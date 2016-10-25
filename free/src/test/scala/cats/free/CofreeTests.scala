@@ -34,7 +34,7 @@ object CofreeTests extends CofreeTestsInstances {
 
   val cofNelToNel = new (CofNel ~> NonEmptyList) {
     override def apply[A](fa: CofNel[A]): NonEmptyList[A] =
-      NonEmptyList[A](fa.head, fa.tail.fold[List[A]](Nil)(apply(_).toList))
+      NonEmptyList[A](fa.head, fa.tailForced.fold[List[A]](Nil)(apply(_).toList))
   }
 
 //  implicit def cofNelArbitrary[A: Arbitrary]: Arbitrary[CofNel[A]] =

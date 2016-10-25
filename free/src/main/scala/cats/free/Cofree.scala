@@ -3,14 +3,14 @@ package free
 
 /**
   * A free comonad for some branching functor `S`. Branching is done lazily using Eval.
+  * A tree with data at the branches, as opposed to Free which is a tree with data at the leaves.
+  * Not an instruction set functor made into a program monad as in Free, but an instruction set's outputs as a
+  * functor made into a functorful of the possible worlds reachable using the instruction set.
   */
 final case class Cofree[S[_], A](head: A, tailEval: Eval[S[Cofree[S, A]]]) extends Product with Serializable {
 
   /** Evaluates and returns the tail of the computation. */
-  def tail: S[Cofree[S, A]] = tailEval.value
-
-  /** Alias for tail. */
-  def context: S[Cofree[S, A]] = tailEval.value
+  def tailForced: S[Cofree[S, A]] = tailEval.value
 
   /** Applies `f` to the head and `g` to the tail. */
   def transform[B](f: A => B, g: Cofree[S, A] => Cofree[S, B])(implicit S: Functor[S]): Cofree[S, B] =
@@ -19,6 +19,18 @@ final case class Cofree[S[_], A](head: A, tailEval: Eval[S[Cofree[S, A]]]) exten
   /** Map over head and inner `S[_]` branches. */
   def map[B](f: A => B)(implicit S: Functor[S]): Cofree[S, B] =
     transform(f, _.map(f))
+
+  /** Transform the branching functor at the root of the Cofree tree. */
+  def mapBranchingRoot(nat: S ~> S)(implicit S: Functor[S]): Cofree[S, A] =
+    Cofree[S, A](head, tailEval.map(nat(_)))
+
+  /** Transform the branching functor, using the S functor to perform the recursion. */
+  def mapBranchingS[T[_]](nat: S ~> T)(implicit S: Functor[S]): Cofree[T, A] =
+    Cofree[T, A](head, tailEval.map(v => nat(S.map(v)(_.mapBranchingS(nat)))))
+
+  /** Transform the branching functor, using the T functor to perform the recursion. */
+  def mapBranchingT[T[_]](nat: S ~> T)(implicit T: Functor[T]): Cofree[T, A] =
+    Cofree[T, A](head, tailEval.map(v => T.map(nat(v))(_.mapBranchingT(nat))))
 
   /** Map `f` over each subtree of the computation. */
   def coflatMap[B](f: Cofree[S, A] => B)(implicit S: Functor[S]): Cofree[S, B] =
@@ -43,13 +55,24 @@ final case class Cofree[S[_], A](head: A, tailEval: Eval[S[Cofree[S, A]]]) exten
 
 object Cofree extends CofreeInstances {
 
-  /** Cofree anamorphism. */
+  /** Cofree anamorphism, lazily evaluated. */
   def unfold[F[_], A](a: A)(f: A => F[A])(implicit F: Functor[F]): Cofree[F, A] =
     Cofree[F, A](a, Eval.later(F.map(f(a))(unfold(_)(f))))
 
-  /** Decompile a program in a comonadic language into another functor's cofree comonad */
+  /** Cofree anamorphism, with customizable evaluation strategy. */
+  def unfoldStrategy[F[_], A](a: A)(f: A => F[A],
+                                    strategy: (=> F[Cofree[F, A]]) => Eval[F[Cofree[F, A]]])(implicit F: Functor[F]): Cofree[F, A] =
+    Cofree[F, A](a, strategy(F.map(f(a))(unfold(_)(f))))
+
+  /** Decompile a comonadic value into another functor's cofree comonad. */
   def decompile[F[_], W[_], A](wa: W[A])(f: W ~> F)(implicit W: Comonad[W]): Cofree[F, A] =
     Cofree[F, A](W.extract(wa), Eval.later(f(W.coflatMap(wa)(decompile(_)(f)))))
+
+  /** Decompile a comonadic value into another functor's cofree comonad. */
+  def decompileStrategy[F[_], W[_], A](wa: W[A])
+                                      (f: W ~> F, strategy: (=> F[Cofree[F, A]]) => Eval[F[Cofree[F, A]]])
+                                      (implicit W: Comonad[W]): Cofree[F, A] =
+    Cofree[F, A](W.extract(wa), strategy(f(W.coflatMap(wa)(decompile(_)(f)))))
 
 }
 
@@ -95,11 +118,8 @@ private trait CofreeComonad[S[_]] extends Comonad[Cofree[S, ?]] {
   implicit def F: Functor[S]
 
   override final def extract[A](p: Cofree[S, A]): A = p.extract
-
   override final def coflatMap[A, B](a: Cofree[S, A])(f: Cofree[S, A] => B): Cofree[S, B] = a.coflatMap(f)
-
   override final def coflatten[A](a: Cofree[S, A]): Cofree[S, Cofree[S, A]] = a.coflatten
-
   override final def map[A, B](a: Cofree[S, A])(f: A => B): Cofree[S, B] = a.map(f)
 }
 
@@ -110,11 +130,10 @@ private trait CofreeFlatMap[F[_]] extends FlatMap[Cofree[F, ?]] with CofreeComon
 
   override final def flatMap[A, B](fa: Cofree[F, A])(f: A => Cofree[F, B]): Cofree[F, B] = {
     val c = f(fa.head)
-    Cofree[F, B](c.head, c.tailEval.map(G.combineK(_, F.map(fa.tail)(flatMap(_)(f)))))
+    Cofree[F, B](c.head, c.tailEval.map(G.combineK(_, F.map(fa.tailForced)(flatMap(_)(f)))))
   }
-
   override def tailRecM[A, B](a: A)(f: A => Cofree[F, Either[A, B]]): Cofree[F, B] = {
-    ???
+    Cofree(a, f())
   }
 }
 
@@ -128,13 +147,13 @@ private trait CofreeFoldable[F[_]] extends Foldable[Cofree[F, ?]] {
   implicit def F: Foldable[F]
 
   override final def foldMap[A, B](fa: Cofree[F, A])(f: A => B)(implicit M: Monoid[B]): B =
-    M.combine(f(fa.head), F.foldMap(fa.tail)(foldMap(_)(f)))
+    M.combine(f(fa.head), F.foldMap(fa.tailForced)(foldMap(_)(f)))
 
   override final def foldRight[A, B](fa: Cofree[F, A], z: Eval[B])(f: (A, Eval[B]) => Eval[B]): Eval[B] =
-    f(fa.head, F.foldRight(fa.tail, z)(foldRight(_, _)(f)))
+    f(fa.head, fa.tailEval.flatMap(F.foldRight(_, z)(foldRight(_, _)(f))))
 
   override final def foldLeft[A, B](fa: Cofree[F, A], z: B)(f: (B, A) => B): B =
-    F.foldLeft(fa.tail, f(z, fa.head))((b, c) => foldLeft(c, b)(f))
+    F.foldLeft(fa.tailForced, f(z, fa.head))((b, cof) => foldLeft(cof, b)(f))
 
 }
 
@@ -142,7 +161,7 @@ private trait CofreeTraverse[F[_]] extends Traverse[Cofree[F, ?]] with CofreeFol
   implicit def F: Traverse[F]
 
   override final def traverse[G[_], A, B](fa: Cofree[F, A])(f: A => G[B])(implicit G: Applicative[G]): G[Cofree[F, B]] =
-    G.map2(f(fa.head), F.traverse(fa.tail)(traverse(_)(f)))((h, t) => Cofree[F, B](h, Eval.now(t)))
+    G.map2(f(fa.head), F.traverse(fa.tailForced)(traverse(_)(f)))((h, t) => Cofree[F, B](h, Eval.now(t)))
 
 }
 
