@@ -46,7 +46,7 @@ sealed abstract class FreeApplicative[F[_], A] extends Product with Serializable
     }
 
   /** Interpret this algebra into a Monoid */
-  final def analyze[M:Monoid](f: FunctionK[F, λ[α => M]]): M =
+  final def analyze[M: Monoid](f: FunctionK[F, λ[α => M]]): M =
     foldMap[Const[M, ?]](
       λ[FunctionK[F, Const[M, ?]]](x => Const(f(x)))
     ).getConst
@@ -83,4 +83,11 @@ object FreeApplicative {
       def pure[A](a: A): FA[S, A] = Pure(a)
     }
   }
+
+  implicit final def catsFreedForFreeApplicative[S[_]]: FreedK[Applicative, FA[S, ?], S] =
+    new FreedK[Applicative, FA[S, ?], S] {
+      final val freelyGeneratedInstance: Applicative[FA[S, ?]] = freeApplicative
+
+      def foldMap[A, G[_]](fv: FA[S, A])(trans: S ~> G)(implicit ev: Applicative[G]): G[A] = fv.foldMap(trans)
+    }
 }

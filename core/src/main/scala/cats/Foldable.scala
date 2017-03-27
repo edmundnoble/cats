@@ -351,6 +351,12 @@ import simulacrum.typeclass
     }.toList
 
   /**
+    * Convert F[A] to any Free monoid; the universal property of Foldable.
+    */
+  def toFreeMonoid[R, A](fa: F[A])(implicit R: Freed[Monoid, R, A]): R =
+    foldMap(fa)(R.lift)(R.freelyGeneratedTypeclass)
+
+  /**
    * Convert F[A] to a List[A], only including elements which match `p`.
    */
   def filter_[A](fa: F[A])(p: A => Boolean): List[A] =

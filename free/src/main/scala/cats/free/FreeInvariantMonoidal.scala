@@ -74,4 +74,11 @@ object FreeInvariantMonoidal {
       def imap[A, B](fa: FA[S, A])(f: A => B)(g: B => A): FA[S, B] = fa.imap(f)(g)
       def product[A, B](fa: FA[S, A], fb: FA[S, B]): FA[S, (A, B)] = fa.product(fb)
     }
+
+  implicit def catsFreedForFreeInvariantMonoidal[S[_]]: FreedK[InvariantMonoidal, FA[S, ?], S] =
+    new FreedK[InvariantMonoidal, FA[S, ?], S] {
+      val freelyGeneratedTypeclass: InvariantMonoidal[FA[S, ?]] = catsFreeInvariantMonoidal
+      def foldMap[A, G[_]](fv: FA[S, A])(trans: S ~> G)(implicit ev: InvariantMonoidal[G]): G[A] =
+        fv.foldMap(trans)
+    }
 }

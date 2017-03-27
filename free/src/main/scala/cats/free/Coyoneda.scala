@@ -4,9 +4,9 @@ package free
 import cats.arrow.FunctionK
 
 /**
- * The dual view of the Yoneda lemma. Also a free functor on `F`.
+ * The dual view of the Yoneda lemma. The free functor on `F`.
  * This is isomorphic to `F` as long as `F` itself is a functor.
- * The homomorphism from `F[A]` to `Coyoneda[F,A]` exists even when
+ * The function from `F[A]` to `Coyoneda[F,A]` exists even when
  * `F` is not a functor.
  */
 sealed abstract class Coyoneda[F[_], A] extends Serializable { self =>
@@ -24,6 +24,10 @@ sealed abstract class Coyoneda[F[_], A] extends Serializable { self =>
 
   /** Converts to `F[A]` given that `F` is a functor */
   final def run(implicit F: Functor[F]): F[A] = F.map(fi)(k)
+
+  /** Converts to `F[A]` given that `F` is a functor */
+  final def foldMap[G[_]](trans: F ~> G)(implicit G: Functor[G]): G[A] =
+    G.map(trans(fi))(k)
 
   /** Converts to `Yoneda[F,A]` given that `F` is a functor */
   final def toYoneda(implicit F: Functor[F]): Yoneda[F, A] =
@@ -67,5 +71,15 @@ object Coyoneda {
   implicit def catsFreeFunctorForCoyoneda[F[_]]: Functor[Coyoneda[F, ?]] =
     new Functor[Coyoneda[F, ?]] {
       def map[A, B](cfa: Coyoneda[F, A])(f: A => B): Coyoneda[F, B] = cfa map f
+    }
+
+  implicit def catsFreedForCoyoneda[S[_]]: FreedK[Functor, Coyoneda[S, ?], S] =
+    new FreedK[Functor, Coyoneda[S, ?], S] {
+      val freelyGeneratedTypeclass: Functor[Coyoneda[S, ?]] = catsFreeFunctorForCoyoneda[S]
+
+      def foldMap[A, G[_]](fv: Coyoneda[S, A])(trans: S ~> G)(implicit ev: Functor[G]): G[A] =
+        fv.foldMap(trans)
+
+      def lift[A](value: S[A]): Coyoneda[S, A] = Coyoneda.lift(value)
     }
 }

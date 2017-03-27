@@ -145,6 +145,12 @@ import simulacrum.typeclass
       lnel.map { case NonEmptyList(h, t) => NonEmptyList(a, h :: t) }
     }.value
 
+  /**
+    * Convert F[A] to any Free semigroup; the universal property of Reducible.
+    */
+  def toFreeSemigroup[R, A](fa: F[A])(implicit R: Freed[Semigroup, R, A]): R =
+    reduceMap(fa)(R.lift)(R.freelyGeneratedTypeclass)
+
   def compose[G[_]: Reducible]: Reducible[λ[α => F[G[α]]]] =
     new ComposedReducible[F, G] {
       val F = self

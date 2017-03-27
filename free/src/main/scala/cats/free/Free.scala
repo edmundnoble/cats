@@ -236,6 +236,14 @@ object Free {
   /**
    * `Free[S, ?]` has a monad for any type constructor `S[_]`.
    */
+  implicit def catsFreedForFree[S[_]]: FreedK[Monad, Free[S, ?], S] =
+    new FreedK[Monad, Free[S, ?], S] {
+      val freelyGeneratedTypeclass: Monad[Free[S, ?]] = catsFreeMonadForFree
+
+      def foldMap[A, G[_]](fv: Free[S, A])(trans: S ~> G)(implicit ev: Monad[G]): G[A] =
+        fv.foldMap(trans)
+    }
+
   implicit def catsFreeMonadForFree[S[_]]: Monad[Free[S, ?]] =
     new Monad[Free[S, ?]] {
       def pure[A](a: A): Free[S, A] = Free.pure(a)
