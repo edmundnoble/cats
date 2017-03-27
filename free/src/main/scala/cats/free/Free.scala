@@ -45,11 +45,11 @@ sealed abstract class Free[S[_], A] extends Product with Serializable {
   @tailrec
   final def resume(implicit S: Functor[S]): Either[S[Free[S, A]], A] = this match {
     case Pure(a) => Right(a)
-    case Suspend(t) => Left(S.map(t)(Pure(_)))
+    case Suspend(t, _) => Left(S.map(t)(Pure(_)))
     case FlatMapped(c, f) =>
       c match {
         case Pure(a) => f(a).resume
-        case Suspend(t) => Left(S.map(t)(f))
+        case Suspend(t, _) => Left(S.map(t)(f))
         case FlatMapped(d, g) => d.flatMap(dd => g(dd).flatMap(f)).resume
       }
   }
@@ -97,13 +97,13 @@ sealed abstract class Free[S[_], A] extends Product with Serializable {
       rma match {
         case Pure(a) =>
           S.pure(Right(a))
-        case Suspend(ma) =>
+        case Suspend(ma, _) =>
           S.map(ma)(Right(_))
         case FlatMapped(curr, f) =>
           curr match {
             case Pure(x) =>
               S.pure(Left(f(x)))
-            case Suspend(mx) =>
+            case Suspend(mx, _) =>
               S.map(mx)(x => Left(f(x)))
             case FlatMapped(prev, g) =>
               S.pure(Left(prev.flatMap(w => g(w).flatMap(f))))
@@ -123,7 +123,7 @@ sealed abstract class Free[S[_], A] extends Product with Serializable {
   final def foldMap[M[_]](f: FunctionK[S, M])(implicit M: Monad[M]): M[A] =
     M.tailRecM(this)(_.step match {
       case Pure(a) => M.pure(Right(a))
-      case Suspend(sa) => M.map(f(sa))(Right(_))
+      case Suspend(sa, _) => M.map(f(sa))(Right(_))
       case FlatMapped(c, g) => M.map(c.foldMap(f))(cc => Left(g(cc)))
     })
 
@@ -169,7 +169,7 @@ object Free {
   private[free] final case class Pure[S[_], A](a: A) extends Free[S, A]
 
   /** Suspend the computation with the given suspension. */
-  private[free] final case class Suspend[S[_], A](a: S[A]) extends Free[S, A]
+  private[free] final case class Suspend[S[_], A](a: S[A], suspensions: Int = 0) extends Free[S, A]
 
   /** Call a subroutine and continue with the given function. */
   private[free] final case class FlatMapped[S[_], B, C](c: Free[S, C], f: C => Free[S, B]) extends Free[S, B]
@@ -189,6 +189,15 @@ object Free {
    */
   def roll[F[_], A](value: F[Free[F, A]]): Free[F, A] =
     liftF(value).flatMap(identity)
+
+  /**
+   * Absorb a step into the free monad, eagerly flattening suspensions.
+   */
+  def rollM[F[_], A](value: Free[F, F[A]])(implicit F: Monad[F]): Free[F, A] =
+  value match {
+    case Suspend(sa, suspensions) if suspensions < 10 => Suspend(F.flatten(sa), suspensions + 1)
+    case _ => value.flatMap(liftF)
+  }
 
   /**
    * Suspend the creation of a `Free[F, A]` value.
